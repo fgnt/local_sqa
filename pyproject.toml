@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local_sqa"
+version = "2025.10.0"
+description = "Localizable Speech Quality Assessment"
+authors = [{name = "Michael Kuhlmann"}, {email = "sek@nt.upb.de"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "hydra-core>=1.3.2",
+    "omegaconf>=2.3.0",
+    "psutil",
+    "pydub",
+    "scipy",
+    "torch",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+fgnt = [
+    "lazy_dataset @ git+https://github.com/fgnt/lazy_dataset.git",
+    "paderbox @ git+https://github.com/fgnt/paderbox.git",
+    "padertorch @ git+https://github.com/fgnt/padertorch.git",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["local_sqa*"]

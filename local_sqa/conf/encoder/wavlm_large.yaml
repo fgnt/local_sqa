@@ -1,0 +1,15 @@
+# @package _global_
+d_model: 1024
+encoder_frame_rate: 50
+trainer:
+  model:
+    encoder:
+      factory: padertorch.contrib.mk.modules.features.ssl.wavlm.WavLM
+      model_name: WAVLM_LARGE
+      backend: torchaudio
+      layer: -1
+      freeze_feature_extractor: true
+      freeze: false
+      detach: false
+      pad: true
+      fading: half

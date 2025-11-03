@@ -1,0 +1,110 @@
+hydra:
+  run:
+    dir: ${base_dir}
+
+defaults:
+  - _self_
+  - encoder: wav2vec2_base
+
+launch:
+  test_run: false
+  dry_run: false
+  train: true
+  accelerator: auto
+  resume: false
+
+databases:
+  bvcc:
+    factory: local_sqa.modules.data_loader.JsonParser
+    json_path: ../data/bvcc.json
+    train_dataset_names: train_main
+    val_dataset_names: val_main
+    mos_key: rating.mean
+    min_length_in_seconds: 2.0
+  nisqa:
+    factory: local_sqa.modules.data_loader.JsonParser
+    json_path: ../data/nisqa.json
+    train_dataset_names: train_sim
+    val_dataset_names: val_sim
+    mos_key: rating.mean
+    min_length_in_seconds: 2.0
+
+train_dataloader:
+  factory: local_sqa.modules.data_loader.Dataloader
+  batch_size: 48
+  max_total_size: 4800000  # 300s
+  max_padding_rate: 0.1
+  target_sampling_rate: 16_000
+  num_workers: -1
+  resample: true
+val_dataloader:
+  factory: local_sqa.modules.data_loader.Dataloader
+  batch_size: 48
+  stage: val
+  max_total_size: 4800000  # 300s
+  max_padding_rate: 0.1
+  target_sampling_rate: 16_000
+  num_workers: -1
+  seed: 0
+  resample: true
+
+validation:
+  metric: SRCC
+  maximize: true
+  n_back_off: 0
+  lr_update_factor: 3.33e-1
+  back_off_patience: null
+
+base_dir: ../../exp
+lr: 1e-4
+min_lr: 1e-6
+num_seeds: 100
+sub_iterator_length: 400
+zero_init: false
+
+trainer:
+  storage_dir: null
+  stop_trigger:
+  - 100
+  - "epoch"
+  summary_trigger:
+  - 1_000
+  - "iteration"
+  checkpoint_trigger:
+  - 1
+  - "epoch"
+  optimizer:
+    factory: padertorch.optimizer.Adam
+    lr: ${lr}
+    gradient_clipping: 10.
+  model:
+    factory: local_sqa.modules.ssl_mos.SSLMOS
+    d_model: ${d_model}
+    bias: 0.
+    scale: 1.
+    target_key: mos
+    normalize_ratings: true
+    out_activation: tanh
+    standardize_audio: true
+    equal_loudness: true
+    l2_normalization: true
+    criterion:
+      factory: torch.nn.L1Loss
+      reduction: none
+    loss_weights:
+      regression: 1.
+      contrastive_loss: 1.
+      consistency_loss_emb: 10.
+      consistency_loss_scores: 1.
+    bilstm:
+      factory: torch.nn.LSTM
+      input_size: ${d_model}
+      hidden_size: 128
+      num_layers: 1
+      bidirectional: true
+    slicer:
+      factory: local_sqa.modules.slicer.Slicer
+      sampling_rate: ${encoder_frame_rate}
+      min_length_in_seconds: 0.2
+      max_length_in_seconds: 1.0
+      sequence_axis: -2
