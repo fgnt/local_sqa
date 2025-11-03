@@ -30,7 +30,7 @@ Please refer to the [data preparation instructions](local_sqa/data/README.md) fo
 
 ## Models
 We use SSL-based encoders with a simple decoder architecture (one BLSTM layer + one linear layer and average pooling).
-Encoder configurations are provided at [conf/encoder](https://github.com/fgnt/local_sqa/tree/main/conf/encoder).
+Encoder configurations are provided at [conf/encoder](https://github.com/fgnt/local_sqa/tree/main/local_sqa/conf/encoder).
 
 ## Training
 Training can be started with
