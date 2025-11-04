@@ -35,7 +35,7 @@ class JsonParser(Configurable):
 
     @cached_property
     def val_dataset(self):
-        if self.val_dataset_names is None or len(val_dataset_names) == 0:
+        if self.val_dataset_names is None or len(self.val_dataset_names) == 0:
             return lazy_dataset.core.DictDataset({})
         dataset = self.database.get_dataset(self.val_dataset_names)
         return self._process_dataset(dataset)
