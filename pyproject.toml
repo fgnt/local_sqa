@@ -18,6 +18,7 @@ dependencies = [
     "scipy",
     "torch",
     "tqdm",
+    "transformers",
 ]
 
 [project.optional-dependencies]
