@@ -31,7 +31,7 @@ def main(config: DictConfig):
             storage_dir = Path(tempfile.mkdtemp())
         else:
             storage_dir = pt.io.get_new_subdir(
-                base_dir=Path(config.base_dir),
+                basedir=Path(config.base_dir),
             )
             _config["trainer"]["storage_dir"] = str(storage_dir)
         config.trainer.storage_dir = str(storage_dir)
