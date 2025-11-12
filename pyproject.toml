@@ -27,6 +27,11 @@ fgnt = [
     "paderbox @ git+https://github.com/fgnt/paderbox.git",
     "padertorch @ git+https://github.com/fgnt/padertorch.git",
 ]
+inference = [
+    "click",
+    "plotext",
+    "sed_scores_eval @ git+https://github.com/fgnt/sed_scores_eval.git",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
