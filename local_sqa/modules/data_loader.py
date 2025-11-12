@@ -15,6 +15,66 @@ import psutil
 
 
 @dataclass
+class LoadAudio(Configurable):
+    audio_path_keys: tp.Union[str, tp.List[str]] = "audio_path.observation"
+    target_sampling_rate: tp.Optional[int] = None
+    resample: bool = False
+
+    def get_audio_path(self, example: dict):
+        if isinstance(self.audio_path_keys, str):
+            audio_path = example
+            for key in self.audio_path_keys.split('.'):
+                audio_path = audio_path[key]
+            return audio_path
+
+        for audio_path_key in self.audio_path_keys:
+            audio_path = example
+            try:
+                for key in audio_path_key.split('.'):
+                    audio_path = audio_path[key]
+            except KeyError:
+                continue
+            return audio_path
+
+        raise ValueError(
+            f"None of the audio path keys {self.audio_path_keys} found."
+        )
+
+    def __call__(self, example: dict):
+        audio_path = self.get_audio_path(example)
+        example["audio_path"] = audio_path
+        audio, sr = load_audio(
+            audio_path, return_sample_rate=True, dtype="float32"
+        )
+        if (
+            self.target_sampling_rate is not None
+            and sr != self.target_sampling_rate
+        ):
+            if self.resample:
+                audio = resample_sox(
+                    audio, in_rate=sr, out_rate=self.target_sampling_rate
+                )
+                sr = self.target_sampling_rate
+            else:
+                raise ValueError(
+                    f"Sample rate {sr} does not match "
+                    f"target sample rate {self.target_sampling_rate} "
+                    f"and resample is set to False."
+                )
+        example["audio"] = audio
+        example["num_samples"] = audio.shape[-1]
+        example["sampling_rate"] = sr
+        return example
+
+
+def sort_by_length(examples: tp.List[dict]):
+    examples = sorted(
+        examples, key=lambda x: x["num_samples"], reverse=True
+    )
+    return examples
+
+
+@dataclass
 class JsonParser(Configurable):
     json_path: tp.Union[str, Path]
     train_dataset_names: tp.Union[tp.Sequence[str], str]
@@ -45,7 +105,7 @@ class JsonParser(Configurable):
             dataset
             .filter(self.filter_min_length, lazy=False)
             .filter(self.filter_max_length, lazy=False)
-            .map(self.load_audio)
+            .map(LoadAudio(self.audio_path_key))
             .map(self.extract_mos_rating)
             .map(self.finalize_example)
         )
@@ -65,14 +125,6 @@ class JsonParser(Configurable):
             self.max_length_in_seconds * example["sampling_rate"]
         )
         return num_samples <= max_length
-
-    def load_audio(self, example: dict):
-        audio_path = example
-        for key in self.audio_path_key.split('.'):
-            audio_path = audio_path[key]
-        audio = load_audio(audio_path, dtype="float32")
-        example["audio"] = audio
-        return example
 
     def extract_mos_rating(self, example: dict):
         mos = example
@@ -143,7 +195,7 @@ class Dataloader(Configurable):
         dataset = (
             dataset
             .apply(self.batch)
-            .map(self.sort_by_length)
+            .map(sort_by_length)
             .map(collate_fn)
         )
         return dataset
@@ -180,9 +232,3 @@ class Dataloader(Configurable):
             drop_incomplete=False,
             sort_key="num_samples",
         )
-
-    def sort_by_length(self, examples: tp.List[dict]):
-        examples = sorted(
-            examples, key=lambda x: x["num_samples"], reverse=True
-        )
-        return examples
