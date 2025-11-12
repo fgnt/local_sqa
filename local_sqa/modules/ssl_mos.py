@@ -1,5 +1,6 @@
 from collections import defaultdict
 from functools import partial
+from pathlib import Path
 import typing as tp
 
 import numpy as np
@@ -7,6 +8,8 @@ from paderbox.utils.nested import nested_merge
 import padertorch as pt
 from padertorch.contrib.je.modules.reduce import Mean
 from padertorch.contrib.mk.typing import TSeqLen
+from padertorch.data.segment import segment_axis
+from padertorch.data.utils import collate_fn
 from padertorch.ops.mappings import ACTIVATION_FN_MAP
 from padertorch.utils import to_numpy
 import scipy
@@ -15,6 +18,8 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 
 from ..utils.audio_normalization import normalize_loudness
+
+SAMPLING_RATE = 16_000
 
 
 class SSLMOS(pt.Model):
@@ -393,3 +398,119 @@ class SSLMOS(pt.Model):
                 "KTAU": ktau,
             })
         return super().modify_summary(summary)
+
+
+class SpeechQualityPredictor(pt.Module):
+    def __init__(
+        self,
+        ssl_mos: tp.Optional[SSLMOS] = None,
+        storage_dir: tp.Optional[tp.Union[str, Path]] = None,
+        *,
+        checkpoint_name: str = "ckpt_best_SRCC.pth",
+        prepare_example_before: bool = True,
+        device: tp.Optional[tp.Union[str, torch.device]] = None,
+        return_numpy: bool = False,
+        median_filter_size: tp.Optional[int] = None,
+    ):
+        super().__init__()
+        if ssl_mos is not None:
+            self.model = ssl_mos
+        elif storage_dir is not None:
+            self.model = SSLMOS.from_storage_dir(
+                storage_dir, config_name="config.yaml",
+                checkpoint_name=checkpoint_name,
+            )
+        else:
+            raise ValueError(
+                "Either ssl_mos or storage_dir must be provided."
+            )
+        self.model.slicer = None  # Slicer not needed for inference
+        self.prepare_example_before = prepare_example_before
+        self.device = device
+        self.return_numpy = return_numpy
+        self.median_filter_size = median_filter_size
+        if median_filter_size is not None and median_filter_size % 2 == 0:
+            raise ValueError("median_filter_size must be odd.")
+
+        if self.device is None:
+            self.device = torch.device(
+                "cuda" if torch.cuda.is_available() else "cpu"
+            )
+        self.model.to(self.device)
+
+    def median_filter(
+        self,
+        frame_preds: tp.Union[np.ndarray, Tensor],
+        sequence_length: tp.Optional[int] = None,
+    ):
+        if self.median_filter_size is None:
+            return frame_preds
+        if self.return_numpy:
+            if sequence_length is not None:
+                frame_preds, pad = np.array_split(
+                    frame_preds, [sequence_length]
+                )
+            else:
+                pad = np.zeros(0)
+            frame_preds = scipy.signal.medfilt(
+                frame_preds, self.median_filter_size
+            )
+            frame_preds = np.concatenate([frame_preds, pad])
+            return frame_preds
+
+        if sequence_length is not None:
+            frame_preds, pad = torch.tensor_split(
+                frame_preds, [sequence_length]
+            )
+        else:
+            pad = torch.zeros(0, device=frame_preds.device)
+        frame_preds = segment_axis(
+            frame_preds, length=self.median_filter_size, shift=1,
+            end="conv_pad", pad_mode="constant",
+        )
+        frame_preds = torch.median(frame_preds, dim=-1).values
+        hs = (self.median_filter_size - 1) // 2
+        frame_preds = frame_preds[hs:-hs or None]
+        frame_preds = torch.cat([frame_preds, pad], dim=0)
+        return frame_preds
+
+    def stack(self, lst: tp.List[tp.Union[np.ndarray, Tensor]]):
+        if self.return_numpy:
+            return np.stack(lst)
+        return torch.stack(lst)
+
+    @torch.inference_mode()
+    def forward(
+        self, wavs: tp.Union[np.ndarray, Tensor], num_samples: TSeqLen = None,
+    ):
+        wavs = self.model.example_to_device(
+            {self.model.input_key: wavs}
+        )[self.model.input_key].float()
+        if self.prepare_example_before:
+            wavs = pt.unpad_sequence(wavs.moveaxis(-1, 0), num_samples)
+            examples = [{
+                self.model.input_key: to_numpy(wav.moveaxis(0, -1)),
+                self.model.input_seq_len_key: n_samples,
+                "sampling_rate": SAMPLING_RATE,
+            } for wav, n_samples in zip(wavs, num_samples)]
+            examples = map(self.model.prepare_example, examples)
+            batch = self.model.example_to_device(
+                collate_fn(list(examples)), self.device
+            )
+            wavs = batch[self.model.input_key]
+
+        wavs = wavs.to(self.device)
+        _, embds, seq_len_embds = self.model.encode(wavs, num_samples)
+        embds = self.model.normalize_encoder_output(embds, seq_len_embds)
+        y, seq_len_y = self.model.transform(embds, seq_len_embds)  # Decoder embeddings
+        preds, frame_preds = self.model.project(y, seq_len_y)
+
+        preds = self.model.inverse_normalization(preds)
+        frame_preds = self.model.inverse_normalization(frame_preds)
+        if self.return_numpy:
+            preds = to_numpy(preds)
+            frame_preds = to_numpy(frame_preds)
+        frame_preds = self.stack(
+            list(map(self.median_filter, frame_preds, seq_len_embds))
+        )
+        return preds, frame_preds, seq_len_embds
