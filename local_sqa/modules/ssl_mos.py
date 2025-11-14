@@ -411,6 +411,7 @@ class SpeechQualityPredictor(pt.Module):
         device: tp.Optional[tp.Union[str, torch.device]] = None,
         return_numpy: bool = False,
         median_filter_size: tp.Optional[int] = None,
+        consider_mpi: bool = False,
     ):
         super().__init__()
         if ssl_mos is not None:
@@ -419,6 +420,7 @@ class SpeechQualityPredictor(pt.Module):
             self.model = SSLMOS.from_storage_dir(
                 storage_dir, config_name="config.yaml",
                 checkpoint_name=checkpoint_name,
+                consider_mpi=consider_mpi,
             )
         else:
             raise ValueError(

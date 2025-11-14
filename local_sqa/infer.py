@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import logging
 import os
@@ -13,12 +14,18 @@ from paderbox.transform.module_resample import resample_sox
 import padertorch as pt
 from padertorch.data.utils import collate_fn
 import plotext as plt
+import psutil
 from sed_scores_eval.base_modules.io import write_sed_scores
-from tqdm import tqdm
 
 from .modules.data_loader import LoadAudio, sort_by_length
 from .modules.ssl_mos import SpeechQualityPredictor, SAMPLING_RATE
 from .utils import nadir_detection
+
+try:
+    import dlp_mpi
+    DLP_MPI_AVAILABLE = True
+except ImportError:
+    DLP_MPI_AVAILABLE = False
 
 LOCAL_SQA_INFER_MODEL = os.environ.get('LOCAL_SQA_INFER_MODEL', None)
 logger = logging.getLogger("local_sqa.infer")
@@ -29,6 +36,55 @@ formatter = logging.Formatter(
 )
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+
+
+def worker(
+    batch: dict,
+    model: SpeechQualityPredictor,
+    input_path: Path,
+    output_dir: Path,
+    prominence: bool = False,
+    verbose: bool = False,
+    **peak_kwargs,
+):
+    batch_size = batch['audio'].shape[0]
+    preds, frame_preds, seq_len_preds = model(
+        batch['audio'], batch['num_samples'],
+    )
+    for audio_path, pred, frame_pred, n_samples in zip(
+        batch['audio_path'],
+        preds,
+        pt.unpad_sequence(
+            np.moveaxis(frame_preds, 1, 0), seq_len_preds
+        ),
+        batch['num_samples'],
+    ):
+        if verbose:
+            logger.info(
+                "File: %s - Predicted MOS: %.3f",
+                audio_path,
+                pred.item(),
+            )
+        rel_path = audio_path.relative_to(input_path)
+        output_path = output_dir / rel_path.with_suffix('.tsv')
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        scores = frame_pred
+        if prominence:
+            prominences, _ = nadir_detection(
+                frame_pred, **peak_kwargs
+            )
+            scores = np.stack([frame_pred, prominences], axis=1)
+        timestamps = np.linspace(
+            0, n_samples/SAMPLING_RATE,
+            num=len(frame_pred)+1, endpoint=True,
+        )
+        write_sed_scores(
+            scores,
+            output_path,
+            timestamps=timestamps,
+            event_classes=["MOS", "Minima prominences"]
+        )
+    return batch_size
 
 
 @click.command()
@@ -68,6 +124,21 @@ logger.addHandler(handler)
     '--peak-wlen', type=int, default=None,
 )
 @click.option(
+    '--backend', type=click.Choice(['t', 'dlp_mpi']), default='t',
+    help=(
+        'Backend to use for parallel processing. '
+        'Possible choices are threads ("t") and MPI ("dlp_mpi"). '
+        'Defaults to "t" (threads).'
+    ),
+)
+@click.option(
+    '--num-workers', '-j', type=int, default=-1,
+    help=(
+        'Number of workers to use for parallel processing. '
+        'If -1, uses all available CPU cores.'
+    ),
+)
+@click.option(
     '--verbose', '-v', is_flag=True, default=False,
 )
 def inference(
@@ -82,6 +153,8 @@ def inference(
     peak_rel_height: float = 0.5,
     peak_width: tp.Optional[int] = None,
     peak_wlen: tp.Optional[int] = None,
+    backend: str = 't',
+    num_workers: int = -1,
     verbose: bool = False,
 ):
     input_path = Path(input_path)
@@ -102,6 +175,7 @@ def inference(
         return_numpy=True,
         prepare_example_before=input_path.is_file(),
         median_filter_size=median_filter_size,
+        consider_mpi=backend=='dlp_mpi',
     )
 
     if peak_wlen is None:
@@ -197,50 +271,43 @@ def inference(
             "Writing results to output directory: %s", output_dir
         )
         logger.info("Processing batches of size %d.", batch_size)
-        # TODO: Parallelize with threads
-        with tqdm(total=num_examples) as pbar:
-            for batch in iter(examples):
-                batch_size = batch['audio'].shape[0]
-                preds, frame_preds, seq_len_preds = model(
-                    batch['audio'], batch['num_samples'],
+
+        _worker = partial(
+            worker,
+            model=model,
+            input_path=input_path,
+            output_dir=output_dir,
+            prominence=prominence,
+            verbose=verbose,
+            width=peak_width,
+            rel_height=peak_rel_height,
+            wlen=peak_wlen,
+        )
+        if backend == 't':
+            if num_workers < 0:
+                num_workers = len(psutil.Process().cpu_affinity())
+            logger.info(
+                "Using threads backend with %d workers", num_workers
+            )
+            executor = ThreadPoolExecutor(max_workers=num_workers).map(
+                _worker, examples
+            )
+        else:
+            if not DLP_MPI_AVAILABLE:
+                raise ImportError(
+                    "dlp_mpi is not available. "
+                    "Please install it to use the 'dlp_mpi' backend.\n"
+                    "See: https://github.com/fgnt/dlp_mpi"
                 )
-                for audio_path, pred, frame_pred, n_samples in zip(
-                    batch['audio_path'],
-                    preds,
-                    pt.unpad_sequence(
-                        np.moveaxis(frame_preds, 1, 0), seq_len_preds
-                    ),
-                    batch['num_samples'],
-                ):
-                    if verbose:
-                        logger.info(
-                            "File: %s - Predicted MOS: %.3f",
-                            audio_path,
-                            pred.item(),
-                        )
-                    rel_path = audio_path.relative_to(input_path)
-                    output_path = output_dir / rel_path.with_suffix('.tsv')
-                    output_path.parent.mkdir(parents=True, exist_ok=True)
-                    scores = frame_pred
-                    if prominence:
-                        prominences, _ = nadir_detection(
-                            frame_pred,
-                            width=peak_width,
-                            rel_height=peak_rel_height,
-                            wlen=peak_wlen,
-                        )
-                        scores = np.stack([frame_pred, prominences], axis=1)
-                    timestamps = np.linspace(
-                        0, n_samples/SAMPLING_RATE,
-                        num=len(frame_pred)+1, endpoint=True,
-                    )
-                    write_sed_scores(
-                        scores,
-                        output_path,
-                        timestamps=timestamps,
-                        event_classes=["MOS", "Minima prominences"]
-                    )
-                pbar.update(batch_size)
+            logger.info("Using MPI backend")
+            executor = dlp_mpi.map_unordered(
+                _worker, examples,
+                indexable=False,
+                progress_bar=True,
+            )
+        for _ in executor:
+            pass
+        logger.info("Finished.")
 
 
 if __name__ == '__main__':
