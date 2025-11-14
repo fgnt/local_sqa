@@ -13,6 +13,7 @@ launch:
   accelerator: auto
   resume: false
 
+# Database to use for training and validation
 databases:
   bvcc:
     factory: local_sqa.modules.data_loader.JsonParser
@@ -48,6 +49,7 @@ val_dataloader:
   seed: 0
   resample: true
 
+# Validation metric to monitor for learning rate scheduling and early stopping
 validation:
   metric: SRCC
   maximize: true
@@ -64,13 +66,13 @@ zero_init: false
 
 trainer:
   storage_dir: null
-  stop_trigger:
+  stop_trigger:  # Stop training after this number of iterations/epochs
   - 100
   - "epoch"
-  summary_trigger:
+  summary_trigger:  # Write summaries to tensorboard after this number of iterations/epochs
   - 1_000
   - "iteration"
-  checkpoint_trigger:
+  checkpoint_trigger:  # Write a checkpoint after this number of iterations/epochs
   - 1
   - "epoch"
   optimizer:
