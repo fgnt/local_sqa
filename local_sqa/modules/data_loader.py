@@ -57,8 +57,8 @@ class LoadAudio(Configurable):
                 sr = self.target_sampling_rate
             else:
                 raise ValueError(
-                    f"Sample rate {sr} does not match "
-                    f"target sample rate {self.target_sampling_rate} "
+                    f"Sample rate {sr}Hz does not match "
+                    f"target sample rate {self.target_sampling_rate}Hz "
                     f"and resample is set to False."
                 )
         example["audio"] = audio
