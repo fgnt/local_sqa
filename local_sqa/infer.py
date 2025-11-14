@@ -157,6 +157,14 @@ def inference(
     num_workers: int = -1,
     verbose: bool = False,
 ):
+    if backend == "dlp_mpi" and not DLP_MPI_AVAILABLE:
+        raise ImportError(
+            "dlp_mpi is not available. "
+            "Please install it to use the 'dlp_mpi' backend.\n"
+            "See: https://github.com/fgnt/dlp_mpi"
+        )
+    IS_MASTER = (backend != "dlp_mpi") or dlp_mpi.IS_MASTER
+
     input_path = Path(input_path)
 
     if model_dir is None:
@@ -168,7 +176,8 @@ def inference(
                 "directory."
             )
         model_dir = LOCAL_SQA_INFER_MODEL
-    logger.info("Loading SQA model from %s", model_dir)
+    if IS_MASTER:
+        logger.info("Loading SQA model from %s", model_dir)
     model = SpeechQualityPredictor(
         storage_dir=model_dir,
         checkpoint_name=checkpoint_name,
@@ -196,18 +205,20 @@ def inference(
         while wav.ndim < 3:
             wav = wav[None]
 
-        logger.info(
-            "Analysing file: %s\n\tFile length: %.3f s",
-            input_path,
-            wav.shape[-1] / SAMPLING_RATE,
-        )
+        if IS_MASTER:
+            logger.info(
+                "Analysing file: %s\n\tFile length: %.3f s",
+                input_path,
+                wav.shape[-1] / SAMPLING_RATE,
+            )
 
         preds, frame_preds, seq_len_preds = model(wav, [wav.shape[-1]])
 
-        logger.info(
-            "Overall predicted MOS: %.3f",
-            preds[0].item()
-        )
+        if IS_MASTER:
+            logger.info(
+                "Overall predicted MOS: %.3f",
+                preds[0].item()
+            )
         # Plot frame-level predictions for a single file
         t_axis = np.arange(seq_len_preds[0]) / model.model.encoder.frame_rate
 
@@ -246,10 +257,14 @@ def inference(
             )
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Analysing all audio files in directory: %s", input_path)
+        if IS_MASTER:
+            logger.info(
+                "Analysing all audio files in directory: %s", input_path
+            )
         examples = from_path(input_path, suffix=['.wav', '.flac'])
         num_examples = len(examples)
-        logger.info("Found %d audio files.", num_examples)
+        if IS_MASTER:
+            logger.info("Found %d audio files.", num_examples)
         examples = (
             examples
             .map(LoadAudio(
@@ -263,14 +278,15 @@ def inference(
             .map(collate_fn)
             .map(partial(model.model.example_to_device, device=model.device))
         )
-        if prominence:
+        if prominence and IS_MASTER:
             logger.info(
                 "--prominence flag set. Writing local minima prominences."
             )
-        logger.info(
-            "Writing results to output directory: %s", output_dir
-        )
-        logger.info("Processing batches of size %d.", batch_size)
+        if IS_MASTER:
+            logger.info(
+                "Writing results to output directory: %s", output_dir
+            )
+            logger.info("Processing batches of size %d.", batch_size)
 
         _worker = partial(
             worker,
@@ -293,13 +309,8 @@ def inference(
                 _worker, examples
             )
         else:
-            if not DLP_MPI_AVAILABLE:
-                raise ImportError(
-                    "dlp_mpi is not available. "
-                    "Please install it to use the 'dlp_mpi' backend.\n"
-                    "See: https://github.com/fgnt/dlp_mpi"
-                )
-            logger.info("Using MPI backend")
+            if IS_MASTER:
+                logger.info("Using MPI backend")
             executor = dlp_mpi.map_unordered(
                 _worker, examples,
                 indexable=False,
@@ -307,7 +318,8 @@ def inference(
             )
         for _ in executor:
             pass
-        logger.info("Finished.")
+        if IS_MASTER:
+            logger.info("Finished.")
 
 
 if __name__ == '__main__':
