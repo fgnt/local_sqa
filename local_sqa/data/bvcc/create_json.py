@@ -185,8 +185,8 @@ def create_json(
     ),
 )
 @click.option(
-    '--subset', '-s', type=click.Choice(["main", "ood"]),
-    multiple=True, default='main',
+    '--subsets', '-s', type=click.Choice(["main", "ood"]),
+    multiple=True, default=['main'],
     help=(
         'Subset(s) to include in the JSON file. '
         'Can be specified multiple times. '
