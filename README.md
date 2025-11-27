@@ -43,6 +43,11 @@ The default behaviour is as follows:
 - Load `bvcc.json` and `nisqa.json` from `local_sqa/data`
 - Use `wav2vec2_base` as encoder
 
+You can visualize the training progress with TensorBoard:
+```bash
+tensorboard --logdir ./exp/
+```
+
 ### Customization
 We use [Hydra](https://hydra.cc/) for configuration management.
 
