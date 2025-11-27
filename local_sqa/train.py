@@ -45,6 +45,7 @@ def main(config: DictConfig):
         config = OmegaConf.load(
             Path(config.trainer.storage_dir) / 'config.yaml'
         )
+        config.launch.resume = True
 
     log.info(OmegaConf.to_yaml(config))
 
