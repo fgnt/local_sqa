@@ -5,6 +5,7 @@ hydra:
 defaults:
   - _self_
   - encoder: wav2vec2_base
+  - decoder: transformer
 
 launch:
   test_run: false
@@ -81,7 +82,7 @@ trainer:
     gradient_clipping: 10.
   model:
     factory: local_sqa.modules.ssl_mos.SSLMOS
-    d_model: ${d_model}
+    proj_in_size: ${proj_in_size}
     bias: 0.
     scale: 1.
     target_key: mos
@@ -97,13 +98,7 @@ trainer:
       regression: 1.
       contrastive_loss: 1.
       consistency_loss_emb: 10.
-      consistency_loss_scores: 1.
-    bilstm:
-      factory: torch.nn.LSTM
-      input_size: ${d_model}
-      hidden_size: 128
-      num_layers: 1
-      bidirectional: true
+      consistency_loss_scores: 0.
     slicer:
       factory: local_sqa.modules.slicer.Slicer
       sampling_rate: ${encoder_frame_rate}

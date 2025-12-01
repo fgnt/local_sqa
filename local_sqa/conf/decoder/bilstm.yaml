@@ -1,0 +1,12 @@
+# @package _global_
+proj_in_size: 128
+trainer:
+  model:
+    loss_weights:
+      consistency_loss_scores: 1.
+    decoder:
+      factory: torch.nn.LSTM
+      input_size: ${d_model}
+      hidden_size: ${proj_in_size}
+      num_layers: 1
+      bidirectional: true

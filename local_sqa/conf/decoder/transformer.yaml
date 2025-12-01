@@ -1,0 +1,23 @@
+# @package _global_
+proj_in_size: 128
+decoder_bias: true
+trainer:
+  model:
+    decoder:
+      factory: padertorch.contrib.mk.modules.transformer.TransformerEncoder
+      input_size: ${d_model}
+      num_layers: 1
+      positional_encoding: null
+      encoder_layer:
+        d_model: ${proj_in_size}
+        nhead: 4
+        dim_feedforward: 512
+        bidirectional: false
+        bias: ${decoder_bias}
+        attention_fn:
+          linear_attention_bias: true
+      mlp_head:
+        factory: torch.nn.Linear
+        in_features: ${proj_in_size}
+        out_features: ${proj_in_size}
+        bias: ${decoder_bias}

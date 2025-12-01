@@ -27,9 +27,9 @@ class SSLMOS(pt.Model):
         self,
         encoder: pt.Module,
         criterion,
+        proj_in_size: int,
         loss_weights=None,
-        bilstm: tp.Optional[pt.Module] = None,
-        d_model: int = 768,
+        decoder: tp.Optional[pt.Module] = None,
         out_activation=None,
         input_key: str = "audio",
         input_seq_len_key: str = "num_samples",
@@ -52,32 +52,23 @@ class SSLMOS(pt.Model):
 
         self.criterion = criterion
         self.loss_weights = loss_weights
-        self.d_model = d_model
         if out_activation is not None:
             self.out_activation = ACTIVATION_FN_MAP[out_activation]()
         else:
             self.out_activation = nn.Identity()
 
-        if bilstm is not None:
-            try:
-                self.proj_size = (1+bilstm.bidirectional)*bilstm.hidden_size
-                if forget_gate_bias is not None:
-                    for name, param in bilstm.named_parameters():
-                        if "bias" in name:
-                            # Initialize forget gate bias
-                            # See: https://discuss.pytorch.org/t/set-forget-gate-bias-of-lstm/1745/4
-                            n = param.size(0)
-                            param.data[n//4:n//2].fill_(forget_gate_bias)
-            except AttributeError:
-                # TransformerEncoder
-                self.proj_size = bilstm.layers[-1].d_model
-        else:
-            self.proj_size = d_model
+        if isinstance(decoder, nn.LSTM) and forget_gate_bias is not None:
+            for name, param in decoder.named_parameters():
+                if "bias" in name:
+                    # Initialize forget gate bias
+                    # See: https://discuss.pytorch.org/t/set-forget-gate-bias-of-lstm/1745/4
+                    n = param.size(0)
+                    param.data[n//4:n//2].fill_(forget_gate_bias)
 
-        out_proj = nn.Linear(self.proj_size, 1)
         self.encoder = encoder
-        self.bilstm = bilstm
-        self.out_proj = out_proj
+        self.decoder = decoder
+        if proj_in_size > 1:
+            self.out_proj = nn.Linear(proj_in_size, 1, bias=False)
 
         self.input_key = input_key
         self.input_seq_len_key = input_seq_len_key
@@ -107,6 +98,8 @@ class SSLMOS(pt.Model):
         return (ratings - 1) / 2 - 1  # [-1, 1]
 
     def zero_init_(self):
+        if not hasattr(self, 'out_proj'):
+            raise ValueError("Model has no out_proj layer to zero initialize.")
         for param in self.out_proj.parameters():
             param.detach().zero_()
 
@@ -116,15 +109,17 @@ class SSLMOS(pt.Model):
         return (scores + 1) * 2 + 1  # [1, 5]
 
     def reset_parameters(self, seed=None):
+        try:
+            self.decoder.reset_parameters(seed=seed)
+        except (AttributeError, TypeError):
+            pass
+        if not hasattr(self, 'out_proj'):
+            return
         generator = torch.Generator(device=self.out_proj.weight.device)
         if seed is not None:
             generator.manual_seed(seed)
         nn.init.xavier_uniform_(self.out_proj.weight, generator=generator)
-        nn.init.zeros_(self.out_proj.bias)
-        try:
-            self.bilstm.reset_parameters(seed=seed)
-        except (AttributeError, TypeError):
-            pass
+        # nn.init.zeros_(self.out_proj.bias)
 
     def example_to_device(self, example, device=None, memo=None):
         example = super().example_to_device(example, device, memo)
@@ -211,15 +206,18 @@ class SSLMOS(pt.Model):
     def transform(
         self, x: Tensor, seq_len_x: TSeqLen = None, enforce_sorted=True
     ):
-        if self.bilstm is not None:
-            if seq_len_x is not None:
-                x = pt.pack_padded_sequence(
-                    x, seq_len_x, batch_first=True,
-                    enforce_sorted=enforce_sorted,
-                )
-            x, _ = self.bilstm(x)
-            if seq_len_x is not None:
-                x, _ = pt.pad_packed_sequence(x, batch_first=True)
+        if self.decoder is not None:
+            if isinstance(self.decoder, nn.LSTM):
+                if seq_len_x is not None:
+                    x = pt.pack_padded_sequence(
+                        x, seq_len_x, batch_first=True,
+                        enforce_sorted=enforce_sorted,
+                    )
+                x, _ = self.decoder(x)
+                if seq_len_x is not None:
+                    x, _ = pt.pad_packed_sequence(x, batch_first=True)
+            else:
+                x, _ = self.decoder(x, seq_len_x)
         return x, seq_len_x
 
     def reduce(
@@ -228,8 +226,9 @@ class SSLMOS(pt.Model):
         return Mean(axis=1)(x, seq_len_x)
 
     def project(self, x: Tensor, seq_len_x: TSeqLen):
-        preds = self.out_proj(x)
-        preds = self.out_activation(preds).squeeze(-1)
+        if hasattr(self, 'out_proj'):
+            x = self.out_proj(x)
+        preds = self.out_activation(x).squeeze(-1)
         preds = preds*self.scale+self.bias
         return self.reduce(preds, seq_len_x), preds
 
