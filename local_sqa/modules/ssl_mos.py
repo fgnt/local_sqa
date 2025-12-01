@@ -45,6 +45,7 @@ class SSLMOS(pt.Model):
         zero_init: bool = False,
         slicer: tp.Optional[pt.Module] = None,
         forget_gate_bias: tp.Optional[float] = None,
+        take_last: bool = False,
     ):
         super().__init__()
         if margin < 0:
@@ -82,6 +83,7 @@ class SSLMOS(pt.Model):
         self.equal_loudness = equal_loudness
         self.l2_normalization = l2_normalization
         self.slicer = slicer
+        self.take_last = take_last
 
         self.reset_parameters()
         if zero_init:
@@ -230,6 +232,21 @@ class SSLMOS(pt.Model):
             x = self.out_proj(x)
         preds = self.out_activation(x).squeeze(-1)
         preds = preds*self.scale+self.bias
+        if self.take_last:
+            if seq_len_x is None:
+                return preds[:, -1], preds
+            seq_len_x = torch.tensor(seq_len_x, device=preds.device)
+            if self.training:
+                # Noisy last frame during training for better generalization
+                # Shift by +/- 10% of sequence length
+                rel_shift = (
+                    torch.rand_like(seq_len_x.float(), device=preds.device)
+                    * 0.2 - 0.1
+                )
+                shift = (rel_shift * seq_len_x.float()).long()
+                seq_len_x = torch.minimum(seq_len_x + shift, seq_len_x.max())
+            utt_preds = preds.gather(1, seq_len_x.unsqueeze(1)-1).squeeze(1)
+            return utt_preds, preds
         return self.reduce(preds, seq_len_x), preds
 
     def finalize_summary(self, summary: dict):
