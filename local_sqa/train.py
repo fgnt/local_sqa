@@ -9,7 +9,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 import padertorch as pt
-from padertorch.train.hooks import LRAnnealingHook
+from padertorch.train.hooks import LRSchedulerHook
 import torch
 from tqdm.auto import tqdm
 
@@ -36,15 +36,20 @@ def main(config: DictConfig):
             _config["trainer"]["storage_dir"] = str(storage_dir)
         config.trainer.storage_dir = str(storage_dir)
     config_file = Path(config.trainer.storage_dir) / 'config.yaml'
+    resume = config.launch.resume
     if config.launch.train and not config_file.exists():
         pt.io.dump_config(_config, config_file)
-
-    if config.launch.resume:
-        if config.launch.dry_run:
-            raise RuntimeError("Cannot resume in dry run mode.")
+    elif config_file.exists():
+        log.info("Loading config from %s.", config_file)
         config = OmegaConf.load(
             Path(config.trainer.storage_dir) / 'config.yaml'
         )
+    if resume:
+        if config.launch.dry_run:
+            raise RuntimeError("Cannot resume in dry run mode.")
+        # config = OmegaConf.load(
+        #     Path(config.trainer.storage_dir) / 'config.yaml'
+        # )
         config.launch.resume = True
 
     log.info(OmegaConf.to_yaml(config))
@@ -77,13 +82,14 @@ def main(config: DictConfig):
         device = config.launch.accelerator
 
     decay_factor = config.min_lr/config.lr
-    trainer.register_hook(
-        LRAnnealingHook(
-            [1, config.trainer.stop_trigger[1]],
-            [(config.trainer.stop_trigger[0], decay_factor)],
-            config.trainer.stop_trigger[1],
-        ),
-    )
+    trainer.register_hook(LRSchedulerHook(
+        torch.optim.lr_scheduler.LinearLR(
+            trainer.optimizer.optimizer,
+            start_factor=1.0,
+            end_factor=decay_factor,
+            total_iters=config.trainer.stop_trigger[0],
+        ), trigger=[1, config.trainer.stop_trigger[1]],
+    ))
 
     if config.launch.test_run:
         trainer.test_run(train_dataloader, val_dataloader, device=device)
