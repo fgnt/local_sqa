@@ -44,6 +44,8 @@ def main(config: DictConfig):
         config = OmegaConf.load(
             Path(config.trainer.storage_dir) / 'config.yaml'
         )
+        config.launch.init = False
+
     if resume:
         if config.launch.dry_run:
             raise RuntimeError("Cannot resume in dry run mode.")
@@ -53,6 +55,13 @@ def main(config: DictConfig):
         config.launch.resume = True
 
     log.info(OmegaConf.to_yaml(config))
+
+    if config.launch.init:
+        log.info(
+            "Initialization only requested. Config written to %s.",
+            config_file,
+        )
+        return
 
     parsers = []
     for _, db_conf in config.databases.items():

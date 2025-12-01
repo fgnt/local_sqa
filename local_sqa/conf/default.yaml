@@ -8,11 +8,12 @@ defaults:
   - decoder: transformer
 
 launch:
-  test_run: false
-  dry_run: false
+  init: false  # If true, write config to experiment dir and return
+  test_run: false  # If true, run a quick test of the training loop
+  dry_run: false  # If true, write checkpoints to /tmp
   train: true
   accelerator: auto
-  resume: false
+  resume: false  # Resume training from last checkpoint in storage_dir
 
 # Database to use for training and validation
 databases:
@@ -31,10 +32,11 @@ databases:
     mos_key: rating.mean
     min_length_in_seconds: 2.0
 
+max_total_size: 4800000  # 300s
 train_dataloader:
   factory: local_sqa.modules.data_loader.Dataloader
   batch_size: 48
-  max_total_size: 4800000  # 300s
+  max_total_size: ${max_total_size}
   max_padding_rate: 0.1
   target_sampling_rate: 16_000
   num_workers: -1
@@ -43,7 +45,7 @@ val_dataloader:
   factory: local_sqa.modules.data_loader.Dataloader
   batch_size: 48
   stage: val
-  max_total_size: 4800000  # 300s
+  max_total_size: ${max_total_size}
   max_padding_rate: 0.1
   target_sampling_rate: 16_000
   num_workers: -1
