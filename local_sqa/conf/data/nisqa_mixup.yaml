@@ -1,0 +1,12 @@
+# @package _global_
+databases:
+  bvcc:
+    factory: local_sqa.modules.data_loader.NISQAMixupParser
+  nisqa:
+    factory: local_sqa.modules.data_loader.NISQAMixupParser
+    audio_data_key: audio_data
+    p_mixup: 1.0
+trainer:
+  model:
+    loss_weights:
+      frame_regression: 1.0

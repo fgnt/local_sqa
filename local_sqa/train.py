@@ -13,10 +13,11 @@ from padertorch.train.hooks import LRSchedulerHook
 import torch
 from tqdm.auto import tqdm
 
-from .modules.data_loader import JsonParser, Dataloader
+from local_sqa.modules.data_loader import ParquetParser, Dataloader
 
 log = logging.getLogger(__name__)
 
+OmegaConf.register_new_resolver("eval", eval)
 
 @hydra.main(version_base=None, config_path="conf", config_name="default")
 def main(config: DictConfig):
@@ -49,9 +50,6 @@ def main(config: DictConfig):
     if resume:
         if config.launch.dry_run:
             raise RuntimeError("Cannot resume in dry run mode.")
-        # config = OmegaConf.load(
-        #     Path(config.trainer.storage_dir) / 'config.yaml'
-        # )
         config.launch.resume = True
 
     log.info(OmegaConf.to_yaml(config))
@@ -66,7 +64,7 @@ def main(config: DictConfig):
     parsers = []
     for _, db_conf in config.databases.items():
         db_conf = OmegaConf.to_container(db_conf, resolve=True)
-        parsers.append(JsonParser.from_config(db_conf))
+        parsers.append(ParquetParser.from_config(db_conf))
 
     trainer_config = OmegaConf.to_container(config.trainer, resolve=True)
     trainer_config = pt.Trainer.get_config(trainer_config)
@@ -74,16 +72,13 @@ def main(config: DictConfig):
 
     train_dataloader = Dataloader.from_config(
         OmegaConf.to_container(config.train_dataloader, resolve=True)
-    )(
-        *parsers,
-        prepare_example_fn=getattr(trainer.model, "prepare_example", None),
-    )
-    val_dataloader = Dataloader.from_config(
-        OmegaConf.to_container(config.val_dataloader, resolve=True)
-    )(
-        *parsers,
-        prepare_example_fn=getattr(trainer.model, "prepare_example", None),
-    )
+    )(*parsers)
+    if config.val_dataloader is not None:
+        val_dataloader = Dataloader.from_config(
+            OmegaConf.to_container(config.val_dataloader, resolve=True)
+        )(*parsers)
+    else:
+        val_dataloader = None
 
     if config.launch.accelerator == "auto":
         device = 0 if torch.cuda.is_available() else "cpu"
@@ -118,6 +113,7 @@ def main(config: DictConfig):
             not config.launch.resume
             and hasattr(trainer.model, "test_seed")
             and config.num_seeds > 0
+            and val_dataloader is not None
         ):
             # Test seeds
             log.info("Testing seeds.")

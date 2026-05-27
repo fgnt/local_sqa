@@ -4,8 +4,12 @@ hydra:
 
 defaults:
   - _self_
+  - model: null
   - encoder: wav2vec2_base
-  - decoder: transformer
+  - decoder: conv
+  - slicer: null
+  - data: null
+  - contrastive: null
 
 launch:
   init: false  # If true, write config to experiment dir and return
@@ -17,40 +21,39 @@ launch:
 
 # Database to use for training and validation
 databases:
-  bvcc:
-    factory: local_sqa.modules.data_loader.JsonParser
-    json_path: ../data/bvcc.json
-    train_dataset_names: train_main
-    val_dataset_names: val_main
-    mos_key: rating.mean
-    min_length_in_seconds: 2.0
   nisqa:
-    factory: local_sqa.modules.data_loader.JsonParser
-    json_path: ../data/nisqa.json
+    factory: local_sqa.modules.data_loader.ParquetParser
+    input_path: ../data/parquet/nisqa  # Default path to the parquet shards
     train_dataset_names: train_sim
     val_dataset_names: val_sim
-    mos_key: rating.mean
-    min_length_in_seconds: 2.0
+    disable_validation_reshuffle: true
+    additional_keys:
+      - rating
+  bvcc:
+    factory: local_sqa.modules.data_loader.ParquetParser
+    input_path: ../data/parquet/bvcc
+    train_dataset_names: train_main
+    val_dataset_names: val_main
+    disable_validation_reshuffle: true
+    additional_keys:
+      - rating
 
-max_total_size: 4800000  # 300s
 train_dataloader:
   factory: local_sqa.modules.data_loader.Dataloader
-  batch_size: 48
+  batch_size: 64
   max_total_size: ${max_total_size}
   max_padding_rate: 0.1
-  target_sampling_rate: 16_000
+  shuffle_buffer_size: ${eval:"10*${train_dataloader.batch_size}"}
   num_workers: -1
-  resample: true
 val_dataloader:
   factory: local_sqa.modules.data_loader.Dataloader
-  batch_size: 48
+  batch_size: 64
   stage: val
   max_total_size: ${max_total_size}
   max_padding_rate: 0.1
-  target_sampling_rate: 16_000
+  reshuffle: false
   num_workers: -1
   seed: 0
-  resample: true
 
 # Validation metric to monitor for learning rate scheduling and early stopping
 validation:
@@ -83,11 +86,11 @@ trainer:
     lr: ${lr}
     gradient_clipping: 10.
   model:
-    factory: local_sqa.modules.ssl_mos.SSLMOS
+    factory: local_sqa.models.ssl_mos.SSLMOS
     proj_in_size: ${proj_in_size}
-    bias: 0.
+    shift: 0.
     scale: 1.
-    target_key: mos
+    target_key: rating.mean
     normalize_ratings: true
     out_activation: tanh
     standardize_audio: true
@@ -100,10 +103,5 @@ trainer:
       regression: 1.
       contrastive_loss: 1.
       consistency_loss_emb: 10.
-      consistency_loss_scores: 0.
-    slicer:
-      factory: local_sqa.modules.slicer.Slicer
-      sampling_rate: ${encoder_frame_rate}
-      min_length_in_seconds: 0.2
-      max_length_in_seconds: 1.0
-      sequence_axis: -2
+      consistency_loss_scores: 1.
+      frame_regression: 0.

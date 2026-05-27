@@ -10,6 +10,18 @@ from paderbox.utils.nested import nested_merge
 from tqdm.auto import tqdm
 
 DATABASE_ROOT = Path(os.environ.get('DATABASE_ROOT', ''))
+BONA_FIDE_SYSTEMS = [
+    "sys64e2f",  # BC2008-A
+    "sys72474",  # BC2009-A
+    "sys9dd03",  # BC2010-A
+    "sysa1387",  # BC2011-A
+    "sys38cf4",  # BC2013-A
+    "sys48dd4",  # BV2016-A
+    "sys92962",  # VCC2016-source
+    "sys4017d",  # VCC2016-target
+    "sys0fb10",  # VCC2018-S00
+    "sysbdba5",  # VCC2018-T00
+]
 
 
 def read_averaged_scores(dataset_path: Path):
@@ -74,6 +86,7 @@ def read_averaged_scores(dataset_path: Path):
                 "num_samples": num_samples[example_id],
                 "system": system,
                 "sampling_rate": 16_000,
+                "is_bona_fide": system in BONA_FIDE_SYSTEMS,
             }
             if score is not None:
                 examples[example_id].update({
