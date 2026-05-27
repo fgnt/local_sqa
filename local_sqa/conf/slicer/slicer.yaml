@@ -1,0 +1,8 @@
+# @package _global_
+trainer:
+  model:
+    slicer:
+      factory: local_sqa.modules.slicer.Slicer
+      sampling_rate: ${encoder_frame_rate}
+      min_length_in_seconds: 0.2
+      max_length_in_seconds: 2.0
