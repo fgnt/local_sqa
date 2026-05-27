@@ -1,0 +1,5 @@
+# @package _global_
+trainer:
+  model:
+    factory: local_sqa.models.chunk_mos.ChunkMOS
+    segment_length: 50
