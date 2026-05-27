@@ -1,0 +1,75 @@
+# @package _global_
+multi_label: false
+ignore_clean: false
+nisqa_train_num_classes: 19
+nisqa_train_num_combinations: 899
+databases:
+  bvcc:
+    factory: local_sqa.modules.data_loader.BVCCParser
+    add_condition_labels: false
+    validation_labels: false
+    ignore_system: true
+    ignore_clean: ${ignore_clean}
+    multi_label: ${multi_label}
+  nisqa:
+    json_path: ${oc.env:NT_JSONS_DIR}/nisqa.json
+    p_mixup: 1.0
+    min_segments: 2
+    max_segments: 10
+    target_rate: 0.5
+    min_mos_ref: 3.5
+    max_mos_obs: 4.0
+    apply_vad: true
+    diff_threshold: 0.5
+    mixup_conditions: true
+    multi_label: ${multi_label}
+    ignore_clean: ${ignore_clean}
+    exclude_conditions: null
+train_dataloader:
+  shuffle_buffer_size: ${eval:"20*${train_dataloader.batch_size}"}
+validation:
+  metric: scl_EER
+  maximize: false
+num_seeds: 0
+trainer:
+  model:
+    loss_weights:
+      scl_ce: ${trainer.model.scl.temperature}
+      scl_classification_ce: 0.0
+    normalize_decoder: false
+    scl:
+      factory: local_sqa.modules.contrastive.SCL
+      embedding_size: ${proj_in_size}
+      proj_size: 128
+      normalize_encoder: false
+      encoder:
+        factory: padertorch.contrib.je.modules.conv.CNN1d
+        in_channels: ${d_model}
+        out_channels:
+          - 256
+          - 256
+          - ${trainer.model.scl.embedding_size}
+        kernel_size:
+          - 11  # recetive field: 11
+          - 7  # receptive field: 17
+          - 5  # receptive field: 21
+        residual_connections: null
+        normalize_skip_convs: false
+        activation_fn:
+          partial: torch.nn.functional.leaky_relu
+          negative_slope: 0.1
+        norm: batch
+        input_layer: false
+        output_layer: true
+        pre_activation: true
+      label_key: condition_labels
+      similarity: dot_product
+      temperature: 0.1
+      negatives_mode: all
+      negative_to_target_dist: 10  # receptive_field//2
+      positive_to_target_dist: 10
+      prefix: scl
+      l2_normalization: true
+      final_batch_norm: false
+      add_ignore_to_negatives: ${eval:"${ignore_clean} or ${databases.bvcc.add_condition_labels}"}
+      classification: false
