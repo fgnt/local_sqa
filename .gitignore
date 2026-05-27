@@ -1,0 +1,8 @@
+*.DS_STORE
+.vscode
+
+*.egg-info
+*.pyc
+
+*.ipynb
+notebooks/
