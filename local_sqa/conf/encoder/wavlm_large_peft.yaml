@@ -1,0 +1,29 @@
+# @package _global_
+d_model: 1024
+encoder_frame_rate: 50
+max_total_size: 2_880_000  # 180s
+trainer:
+  model:
+    encoder:
+      factory: padertorch.contrib.mk.modules.features.ssl.wavlm.WavLM
+      model_name: microsoft/wavlm-large
+      backend: hf
+      layer: -1
+      freeze_feature_extractor: true
+      freeze: false
+      detach: false
+      pad: true
+      fading: half
+      peft_config:
+        factory: peft.LoraConfig
+        r: 16
+        lora_alpha: 32
+        task_type: "FEATURE_EXTRACTION"
+        target_modules:
+          - q_proj
+          - k_proj
+          - v_proj
+          - out_proj
+          - gru_rel_pos_linear
+          - intermediate_dense
+          - output_dense

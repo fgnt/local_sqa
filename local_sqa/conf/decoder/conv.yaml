@@ -1,0 +1,21 @@
+# @package _global_
+proj_in_size: 128
+trainer:
+  model:
+    bias: false
+    decoder:
+      factory: padertorch.contrib.je.modules.conv.CNN1d
+      in_channels: ${d_model}
+      out_channels:
+        - 256
+        - 256
+        - ${proj_in_size}
+      kernel_size:
+        - 11  # recetive field: 11
+        - 7  # receptive field: 17
+        - 5  # receptive field: 21
+      input_layer: false
+      output_layer: false
+      activation_fn: leaky_relu
+      norm: batch
+      pre_activation: true

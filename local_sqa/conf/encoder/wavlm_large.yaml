@@ -1,6 +1,7 @@
 # @package _global_
 d_model: 1024
 encoder_frame_rate: 50
+max_total_size: 2_880_000  # 180s
 trainer:
   model:
     encoder:

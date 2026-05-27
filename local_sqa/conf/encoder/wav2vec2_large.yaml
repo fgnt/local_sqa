@@ -1,12 +1,13 @@
 # @package _global_
 d_model: 1024
 encoder_frame_rate: 50
+max_total_size: 2_880_000  # 180s
 trainer:
   model:
     encoder:
       factory: padertorch.contrib.mk.modules.features.ssl.wav2vec2.Wav2Vec2
-      model_name: WAV2VEC2_LARGE
-      backend: torchaudio
+      model_name: facebook/wav2vec2-large-robust
+      backend: hf
       layer: -1
       freeze_feature_extractor: true
       freeze: false
